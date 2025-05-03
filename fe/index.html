@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skible Chat & Game Service</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+    #lobby, #game-container { margin-top: 20px; }
+    .hidden { display: none; }
+    #chatArea { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: auto; margin-bottom: 10px; }
+    #chatInput { width: calc(100% - 90px); padding: 8px; }
+    .btn { padding: 8px 16px; margin: 5px 0; cursor: pointer; border-radius: 4px; border: 1px solid #333; }
+    #wordOptions button { margin-right: 5px; margin-top: 5px; }
+    #guessSection { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Skible Chat & Game</h2>
+
+  <div id="lobby">
+    <input id="nameInput" type="text" placeholder="Enter your name" />
+    <input id="roomInput" type="text" placeholder="Enter room ID (to join)" />
+    <button id="createBtn" class="btn">Create Room</button>
+    <button id="joinBtn" class="btn">Join Room</button>
+  </div>
+
+  <div id="game-container" class="hidden">
+    <p>Connected as <strong id="status"></strong></p>
+    <p>Room ID: <strong id="currentRoom"></strong></p>
+
+    <!-- Chat -->
+    <div id="chatArea"></div>
+    <div id="chatControls">
+      <input id="chatInput" type="text" placeholder="Type a message..." />
+      <button id="chatBtn" class="btn">Send Chat</button>
+    </div>
+
+    <!-- Game Controls -->
+    <div id="pickSection" class="hidden">
+      <h3>Pick a word</h3>
+      <div id="wordOptions"></div>
+    </div>
+    <div id="guessSection" class="hidden">
+      <h3>Guess the word</h3>
+      <input id="guessInput" type="text" placeholder="Your guess" />
+      <button id="guessBtn" class="btn">Submit Guess</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+  <script>
+    let stompClient;
+    let playerName;
+    let roomId;
+
+    function connect(callback) {
+      const socket = new SockJS('http://localhost:3000/ws');
+      stompClient = Stomp.over(socket);
+      stompClient.connect({}, () => callback());
+    }
+
+    function setupSubscriptions() {
+      // Chat
+      stompClient.subscribe(`/topic/room/${roomId}/chat`, frame => {
+        const payload = JSON.parse(frame.body);
+        const sender = payload.sender || payload.playerName;
+        addMessage(`${sender}: ${payload.content}`);
+      });
+
+      // Word options for P1
+      stompClient.subscribe(`/topic/room/${roomId}/word-options`, frame => {
+        const { options } = JSON.parse(frame.body);
+        console.log('Received options:', options);
+        showPickOptions(options);
+      });
+
+      // Word chosen event
+      stompClient.subscribe(`/topic/room/${roomId}/word-chosen`, frame => {
+        const { chosenWord } = JSON.parse(frame.body);
+        console.log('Word chosen:', chosenWord);
+        // hide pick, show guess for P2
+        document.getElementById('pickSection').classList.add('hidden');
+        showGuessSection();
+      });
+
+      // Game ended
+      stompClient.subscribe(`/topic/room/${roomId}/game-ended`, frame => {
+        const { winner } = JSON.parse(frame.body);
+        alert(`Game over! Winner: ${winner}`);
+      });
+    }
+
+    function setupUI() {
+      document.getElementById('lobby').classList.add('hidden');
+      document.getElementById('game-container').classList.remove('hidden');
+      document.getElementById('status').innerText = playerName;
+      document.getElementById('currentRoom').innerText = roomId;
+    }
+
+    function addMessage(text) {
+      const chat = document.getElementById('chatArea');
+      const p = document.createElement('p'); p.innerText = text;
+      chat.appendChild(p);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    document.getElementById('createBtn').onclick = () => {
+      playerName = document.getElementById('nameInput').value.trim();
+      if (!playerName) return alert('Enter your name');
+      connect(() => {
+        stompClient.subscribe('/topic/room-created', msg => {
+          const data = JSON.parse(msg.body);
+          roomId = data.roomId;
+          setupSubscriptions();
+          setupUI();
+        });
+        stompClient.send('/app/create-room', {}, JSON.stringify({ playerName }));
+      });
+    };
+
+    document.getElementById('joinBtn').onclick = () => {
+      playerName = document.getElementById('nameInput').value.trim();
+      roomId = document.getElementById('roomInput').value.trim();
+      if (!playerName || !roomId) return alert('Enter both name and room ID');
+      connect(() => {
+        setupSubscriptions();
+        setupUI();
+        stompClient.send('/app/join-room', {}, JSON.stringify({ playerName, roomId }));
+      });
+    };
+
+    document.getElementById('chatBtn').onclick = () => {
+      const msg = document.getElementById('chatInput').value.trim();
+      if (!msg) return;
+      stompClient.send('/app/chat', {}, JSON.stringify({ roomId, sender: playerName, content: msg }));
+      document.getElementById('chatInput').value = '';
+    };
+
+    // Game controls
+    function showPickOptions(options) {
+      const container = document.getElementById('wordOptions');
+      container.innerHTML = '';
+      options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.innerText = opt;
+        btn.className = 'btn';
+        btn.onclick = () => pickWord(opt);
+        container.appendChild(btn);
+      });
+      document.getElementById('pickSection').classList.remove('hidden');
+    }
+
+    function pickWord(word) {
+      stompClient.send('/app/pick-word', {}, JSON.stringify({ roomId, chosenWord: word }));
+      document.getElementById('pickSection').classList.add('hidden');
+    }
+
+    function showGuessSection() {
+      document.getElementById('guessSection').classList.remove('hidden');
+    }
+
+    document.getElementById('guessBtn').onclick = () => {
+      const guess = document.getElementById('guessInput').value.trim();
+      if (!guess) return;
+      stompClient.send('/app/next-round', {}, JSON.stringify({ roomId, guess }));
+      document.getElementById('guessSection').classList.add('hidden');
+    };
+  </script>
+</body>
+</html>
