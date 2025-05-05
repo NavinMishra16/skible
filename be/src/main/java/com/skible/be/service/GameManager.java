@@ -31,6 +31,7 @@ public class GameManager {
         room.addPlayer(hostPlayer);
         rooms.put(room.getRoomId(), room);
         gameStateService.initializeGame(room.getRoomId());
+        gameStateService.addPlayerToGame(room.getRoomId(),hostPlayer);
         return room;
     }
 
@@ -46,6 +47,14 @@ public class GameManager {
         return room;
     }
 
+    // toggle Players to Start the Game
+     public  boolean togglePlayerReady(String roomId, String playerName){
+        return gameStateService.togglePlayerReady(roomId,playerName);
+     }
+     // Check all players are ready or not
+    public  boolean allPlayerReady(String roomId){
+        return gameStateService.allPlayersReady(roomId);
+    }
     /**
      * Starts a game in the specified room
      */

@@ -7,12 +7,16 @@ import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 @Service
 public class GameStateService {
     private final Map<String, GameState> gameStates = new ConcurrentHashMap<>();
     private final Map<String, String> chosenWords = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> readyPlayers = new ConcurrentHashMap<>();
 
     public GameState initializeGame(String roomId) {
         GameState state = new GameState();
@@ -21,17 +25,38 @@ public class GameStateService {
         state.setLastRoundResult(RoundResult.PENDING);
         state.setCurrentPlayerIndex(0); // Start with first player
         gameStates.put(roomId, state);
+        readyPlayers.put(roomId,new CopyOnWriteArraySet<>());
         return state;
     }
 
     public GameState addPlayerToGame(String roomId, String playerName) {
         GameState state = getState(roomId);
         state.addPlayer(playerName);
+        readyPlayers.computeIfAbsent(roomId,k->new CopyOnWriteArraySet<>());
         return state;
+    }
+
+    public  boolean togglePlayerReady(String roomId, String playerName){
+        Set<String> readySet = readyPlayers.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>());
+        if (readySet.contains(playerName)) {
+            readySet.remove(playerName);
+            return false;
+        }
+        else {
+            readySet.add(playerName);
+            return true;
+        }
+    }
+
+    public boolean allPlayersReady(String roomId) {
+        GameState state = getState(roomId);
+        Set<String> readySet = readyPlayers.get(roomId);
+        return readySet != null && state.getPlayers().size() > 0 && readySet.containsAll(state.getPlayers());
     }
 
     public GameState startGame(String roomId) {
         GameState state = getState(roomId);
+
         if (state.getPlayers().size() < 2) {
 
             throw new IllegalStateException("Need at least 2 players to start the game");

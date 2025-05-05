@@ -4,10 +4,12 @@ package com.skible.be.skibleController;
 import com.skible.be.dto.*;
 import com.skible.be.service.GameManager;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
@@ -15,7 +17,10 @@ import java.util.Map;
 /**
  * WebSocket controller for managing rooms and chat in Skible.
  */
+@RestController
 @Controller
+@RequestMapping("/api")
+@CrossOrigin(origins = "*")
 public class SkibleController {
 
       private final GameManager gameManager;
@@ -61,7 +66,36 @@ public class SkibleController {
             );
       }
 
-      /**
+
+
+
+      /*
+         Added https POST Request for start game
+       */
+
+      @PostMapping("/player-ready")
+      public ResponseEntity<?> playerReady(@RequestBody PlayerReadyRequest req) {
+            boolean isReady =  gameManager.togglePlayerReady(req.getRoomId(),req.getPlayerName());
+
+            messagingTemplate.convertAndSend(
+                    "/topic/room/" + req.getRoomId() + "/player-ready",
+                    new PlayerReadyResponse(req.getPlayerName(), isReady)
+            );
+
+            if (gameManager.allPlayerReady(req.getRoomId())) {
+                  GameStateResponse resp = gameManager.startGame(req.getRoomId());
+
+                  messagingTemplate.convertAndSend(
+                          "/topic/room/" + req.getRoomId() + "/game-started",
+                          resp
+                  );
+            }
+
+            return ResponseEntity.ok().build();
+      }
+
+
+      /**  startGame, 60 sec Timer or usme muje player 1 ko yeh 3 word aayega
        * Get word options for a player to choose from.
        * Sends word options to subscribers of /topic/room/{roomId}/word-options.
        */
