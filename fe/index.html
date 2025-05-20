@@ -3,6 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <title>Skible Chat & Ready</title>
+  <style>
+    .word-option-btn {
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin: 4px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
   <h2>Skible Chat & Ready</h2>
@@ -28,17 +39,20 @@
       <button id="readyBtn">Ready</button>
       <span id="readyStatus">Not ready</span>
     </div>
-
     <div id="gameLog" style="border:1px solid #999; padding:10px; height:150px; overflow-y:auto;"></div>
+
+    <div id="wordOptionsPanel" style="display:none; margin-top:20px;">
+      <h4>Pick one of these words:</h4>
+      <div id="wordOptionsButtons"></div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
   <script>
-    let stompClient;
-    let playerName;
-    let roomId;
+    let stompClient, playerName, roomId;
     let isReady = false;
+    const readyplayer = new Set();
 
     function connect(callback) {
       const socket = new SockJS('http://localhost:3001/ws');
@@ -75,20 +89,58 @@
       });
     }
 
-    function subscribeToGameStarted() {
-      stompClient.subscribe(`/topic/room/${roomId}/game-started`, frame => {
-        const data = JSON.parse(frame.body);
-        logGameEvent("🎮 Game Started!");
-        logGameEvent(`Current Player: ${data.players[data.currentPlayerIndex]}`);
-        console.log("Game started data:", data);
-      });
-    }
-
     function subscribeToReady() {
       stompClient.subscribe(`/topic/room/${roomId}/player-ready`, frame => {
         const data = JSON.parse(frame.body);
         logGameEvent(`Player ${data.playerName} is ${data.ready ? 'ready' : 'not ready'}`);
+        if (data.ready) readyplayer.add(data.playerName);
+        else readyplayer.delete(data.playerName);
+        if (readyplayer.size === 2) {
+          requestWordOption();
+        }
       });
+    }
+
+    function subscribeToGameStarted() {
+      stompClient.subscribe(`/topic/room/${roomId}/game-started`, frame => {
+        const data = JSON.parse(frame.body);
+        logGameEvent("🎮 Game Started!");
+        logGameEvent(`Current Player: ${data.currentPlayer}`);
+        console.log("Game started data:", data);
+      });
+    }
+
+    function subscribeToWordOption() {
+      stompClient.subscribe(`/topic/room/${roomId}/word-options`, frame => {
+        console.log("Word options payload:", frame.body);
+        const { options } = JSON.parse(frame.body);
+        renderWordOption(options);
+      });
+    }
+
+    function requestWordOption() {
+      logGameEvent('Requesting Word Options...');
+      stompClient.send('/app/get-word-options', {}, JSON.stringify({ roomId }));
+    }
+
+    function renderWordOption(options) {
+      const panel = document.getElementById('wordOptionsPanel');
+      const container = document.getElementById('wordOptionsButtons');
+      container.innerHTML = '';
+
+      options.forEach(word => {
+        const btn = document.createElement('button');
+        btn.className = 'word-option-btn';
+        btn.innerText = word;
+        btn.addEventListener('click', () => {
+          stompClient.send('/app/choose-word', {}, JSON.stringify({ roomId, word }));
+          logGameEvent(`You selected the word: ${word}`);
+          panel.style.display = 'none';
+        });
+        container.appendChild(btn);
+      });
+
+      panel.style.display = 'block';
     }
 
     document.getElementById('createBtn').onclick = () => {
@@ -104,6 +156,7 @@
           subscribeToChat();
           subscribeToReady();
           subscribeToGameStarted();
+          subscribeToWordOption();
         });
         stompClient.send('/app/create-room', {}, JSON.stringify({ playerName }));
       });
@@ -119,6 +172,7 @@
         subscribeToChat();
         subscribeToReady();
         subscribeToGameStarted();
+        subscribeToWordOption();
         stompClient.send('/app/join-room', {}, JSON.stringify({ playerName, roomId }));
       });
     };
