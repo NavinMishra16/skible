@@ -58,7 +58,6 @@ public class GameStateService {
         GameState state = getState(roomId);
 
         if (state.getPlayers().size() < 2) {
-
             throw new IllegalStateException("Need at least 2 players to start the game");
         }
         state.setStatus(GameStatus.IN_PROGRESS);
@@ -137,4 +136,16 @@ public class GameStateService {
                 return "No result";
         }
     }
+
+    public String getCurrentPlayer(String roomId){
+        GameState state = getState(roomId);
+        return state.getPlayers().get(state.getCurrentPlayerIndex());
+    }
+
+    public String advanceTurn(String roomId){
+        GameState state = getState(roomId);
+        state.toggleCurrentPlayer();
+        return getCurrentPlayer(roomId);
+    }
+
 }

@@ -63,6 +63,30 @@ public class GameManager {
         return new GameStateResponse(state, null);
     }
 
+    /*
+     * Only let the current player choose the word
+     */
+    public List<String> getWordOptionsForRoom(String roomId, String requester){
+        String current = gameStateService.getCurrentPlayer(roomId);
+        if(!current.equals(requester)){
+            throw new IllegalStateException("Not your Turn");
+        }
+        return wordService.pickN(3);
+    }
+
+    /*
+     * Record the word advance the turn and choose next player
+     */
+    public String chooseWordAndAdvance(String roomId,String chooser,String word){
+        String current = gameStateService.getCurrentPlayer(roomId);
+        if(!current.equals(chooser)){
+            throw new IllegalStateException("Not your Turn");
+        }
+        gameStateService.updateChosenWord(roomId,word);
+        return gameStateService.advanceTurn(roomId);
+    }
+
+
     /**
      * Moves the game to the next round with the given result
      */
@@ -108,4 +132,6 @@ public class GameManager {
     public String getWinner(String roomId) {
         return gameStateService.getWinner(roomId);
     }
+
+
 }

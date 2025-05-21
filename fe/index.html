@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <title>Skible Chat & Ready</title>
   <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
     .word-option-btn {
       background: #007bff;
       color: white;
@@ -12,6 +18,31 @@
       padding: 8px 12px;
       margin: 4px;
       cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .word-option-btn:hover {
+      background: #0056b3;
+    }
+    #wordOptionsPanel {
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+    }
+    .system-message {
+      color: #6c757d;
+      font-style: italic;
+    }
+    .current-player {
+      font-weight: bold;
+      color: #28a745;
+    }
+    .debug {
+      font-family: monospace;
+      background: #f8f9fa;
+      padding: 5px;
+      border: 1px solid #ddd;
+      display: none;
     }
   </style>
 </head>
@@ -52,12 +83,29 @@
   <script>
     let stompClient, playerName, roomId;
     let isReady = false;
-    const readyplayer = new Set();
+    let currentPlayer = null;
+    const readyPlayers = new Set();
 
     function connect(callback) {
       const socket = new SockJS('http://localhost:3001/ws');
       stompClient = Stomp.over(socket);
-      stompClient.connect({}, callback);
+      
+      // Configure STOMP client to use Principal (username)
+      const connectHeaders = {
+        login: playerName,
+        passcode: ''  // No password needed for this simple demo
+      };
+      
+      stompClient.debug = function(str) {
+        // Uncomment for debugging
+        // console.log("STOMP:", str);
+      };
+      stompClient.connect(connectHeaders, callback, onError);
+    }
+    
+    function onError(error) {
+      console.error("STOMP connection error:", error);
+      alert("Connection error: " + error);
     }
 
     function setupUI() {
@@ -69,14 +117,19 @@
 
     function addMessage(text) {
       const chat = document.getElementById('chatArea');
-      const p = document.createElement('p'); p.innerText = text;
+      const p = document.createElement('p'); 
+      p.innerText = text;
       chat.appendChild(p);
       chat.scrollTop = chat.scrollHeight;
     }
 
-    function logGameEvent(text) {
+    function logGameEvent(text, isSystem = false) {
       const log = document.getElementById('gameLog');
-      const p = document.createElement('p'); p.innerText = text;
+      const p = document.createElement('p'); 
+      p.innerText = text;
+      if (isSystem) {
+        p.className = 'system-message';
+      }
       log.appendChild(p);
       log.scrollTop = log.scrollHeight;
     }
@@ -93,10 +146,10 @@
       stompClient.subscribe(`/topic/room/${roomId}/player-ready`, frame => {
         const data = JSON.parse(frame.body);
         logGameEvent(`Player ${data.playerName} is ${data.ready ? 'ready' : 'not ready'}`);
-        if (data.ready) readyplayer.add(data.playerName);
-        else readyplayer.delete(data.playerName);
-        if (readyplayer.size === 2) {
-          requestWordOption();
+        if (data.ready) {
+          readyPlayers.add(data.playerName);
+        } else {
+          readyPlayers.delete(data.playerName);
         }
       });
     }
@@ -104,36 +157,108 @@
     function subscribeToGameStarted() {
       stompClient.subscribe(`/topic/room/${roomId}/game-started`, frame => {
         const data = JSON.parse(frame.body);
-        logGameEvent("🎮 Game Started!");
-        logGameEvent(`Current Player: ${data.currentPlayer}`);
-        console.log("Game started data:", data);
+        logGameEvent("🎮 Game Started!", true);
+        
+        // Clear word options panel from previous games
+        document.getElementById('wordOptionsPanel').style.display = 'none';
       });
     }
 
-    function subscribeToWordOption() {
+    function subscribeToTurnStart() {
+      stompClient.subscribe(`/topic/room/${roomId}/turn-start`, frame => {
+        const data = JSON.parse(frame.body);
+        currentPlayer = data.currentPlayer;
+        
+        // Log who's turn it is
+        logGameEvent(`✋ It's now ${currentPlayer}'s turn`, true);
+        
+        // Clear any previous word options
+        document.getElementById('wordOptionsPanel').style.display = 'none';
+        
+        // If it's my turn, request word options
+        if (currentPlayer === playerName) {
+          logGameEvent(`It's your turn! Requesting word options...`, true);
+          
+          // Request word options after a short delay
+          setTimeout(() => {
+            requestWordOptions();
+          }, 500);
+        } else {
+          logGameEvent(`Waiting for ${currentPlayer} to choose a word...`, true);
+        }
+      });
+    }
+
+    function subscribeToWordOptions() {
       stompClient.subscribe(`/topic/room/${roomId}/word-options`, frame => {
-        console.log("Word options payload:", frame.body);
-        const { options } = JSON.parse(frame.body);
-        renderWordOption(options);
+        console.log("Word options received:", frame.body);
+        const data = JSON.parse(frame.body);
+        
+        // Only show word options if it's my turn
+        if (currentPlayer === playerName) {
+          if (data.options && data.options.length > 0) {
+            console.log("Rendering word options:", data.options);
+            renderWordOptions(data.options);
+          } else {
+            console.error("Received empty word options");
+            logGameEvent('No word options available', true);
+          }
+        } else {
+          console.log("Received word options but it's not my turn");
+        }
+      });
+    }
+    
+    function subscribeToWordChosen() {
+      stompClient.subscribe(`/topic/room/${roomId}/word-chosen`, frame => {
+        const data = JSON.parse(frame.body);
+        logGameEvent(`Word chosen: ${data.chosenWord}`, true);
+      });
+    }
+    
+    function subscribeToGameState() {
+      stompClient.subscribe(`/topic/room/${roomId}/game-state`, frame => {
+        // You can use this to update UI with game progress if needed
+        console.log("Game state update:", JSON.parse(frame.body));
       });
     }
 
-    function requestWordOption() {
-      logGameEvent('Requesting Word Options...');
-      stompClient.send('/app/get-word-options', {}, JSON.stringify({ roomId }));
+    function requestWordOptions() {
+      console.log("Requesting word options as player:", playerName);
+      
+      // Add debugging info to the game log
+      logGameEvent(`Requesting word options...`, true);
+      
+      stompClient.send('/app/get-word-options', {}, JSON.stringify({ 
+        roomId,
+        playerName: playerName  // Include playerName explicitly since Principal isn't working
+      }));
     }
 
-    function renderWordOption(options) {
+    function renderWordOptions(options) {
       const panel = document.getElementById('wordOptionsPanel');
       const container = document.getElementById('wordOptionsButtons');
       container.innerHTML = '';
+
+      if (!options || options.length === 0) {
+        logGameEvent('No word options available', true);
+        return;
+      }
+
+      // Log to console and game log for debugging
+      console.log(`Showing word options to ${playerName}:`, options);
+      logGameEvent(`Your turn! Choose one of these words: ${options.join(', ')}`, true);
 
       options.forEach(word => {
         const btn = document.createElement('button');
         btn.className = 'word-option-btn';
         btn.innerText = word;
         btn.addEventListener('click', () => {
-          stompClient.send('/app/choose-word', {}, JSON.stringify({ roomId, word }));
+          stompClient.send('/app/pick-word', {}, JSON.stringify({ 
+            roomId, 
+            chosenWord: word,
+            playerName: playerName // Add playerName to handle null Principal
+          }));
           logGameEvent(`You selected the word: ${word}`);
           panel.style.display = 'none';
         });
@@ -141,6 +266,17 @@
       });
 
       panel.style.display = 'block';
+    }
+
+    // Set up all subscriptions
+    function setupSubscriptions() {
+      subscribeToChat();
+      subscribeToReady();
+      subscribeToGameStarted();
+      subscribeToTurnStart();
+      subscribeToWordOptions(); // This subscription handles showing word options
+      subscribeToWordChosen();
+      subscribeToGameState();
     }
 
     document.getElementById('createBtn').onclick = () => {
@@ -153,10 +289,7 @@
           const data = JSON.parse(msg.body);
           roomId = data.roomId;
           setupUI();
-          subscribeToChat();
-          subscribeToReady();
-          subscribeToGameStarted();
-          subscribeToWordOption();
+          setupSubscriptions();
         });
         stompClient.send('/app/create-room', {}, JSON.stringify({ playerName }));
       });
@@ -169,10 +302,7 @@
 
       connect(() => {
         setupUI();
-        subscribeToChat();
-        subscribeToReady();
-        subscribeToGameStarted();
-        subscribeToWordOption();
+        setupSubscriptions();
         stompClient.send('/app/join-room', {}, JSON.stringify({ playerName, roomId }));
       });
     };
@@ -183,6 +313,13 @@
       stompClient.send('/app/chat', {}, JSON.stringify({ roomId, sender: playerName, content: msg }));
       document.getElementById('chatInput').value = '';
     };
+
+    // Add Enter key handler for chat
+    document.getElementById('chatInput').addEventListener('keypress', event => {
+      if (event.key === 'Enter') {
+        document.getElementById('chatBtn').click();
+      }
+    });
 
     document.getElementById('readyBtn').onclick = () => {
       fetch('http://localhost:3001/api/player-ready', {
@@ -198,7 +335,10 @@
           document.getElementById('readyBtn').innerText = isReady ? 'Unready' : 'Ready';
         }
       })
-      .catch(err => alert(err.message));
+      .catch(err => {
+        console.error("Error toggling ready status:", err);
+        alert("Error: " + err.message);
+      });
     };
   </script>
 </body>
