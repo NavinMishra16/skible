@@ -22,12 +22,13 @@ This project enables real-time multiplayer gameplay using WebSockets (STOMP over
 - Real-time chat and ready state
 - Auto game start when all players are ready
 - Game state management with backend sync
-- Options Added to choose Word
+- Options Added to choose Word / turn based option to choose Word
 
 ---
 ## Next Feature 
 
-- Turn Based Event Game ETA 20.5.2025
+- Guess logic from ChatOption and validatiton 
+
 
 ## 🧪 How to Test
 
