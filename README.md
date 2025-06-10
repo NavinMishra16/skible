@@ -6,13 +6,17 @@ This project enables real-time multiplayer gameplay using WebSockets (STOMP over
 
 ##  Key Fixes
 
-### 🛠️ 1. Room ID Overwriting Fix
+###  1. Room ID Overwriting Fix
 - **Issue:** Whenever any player created a room, a new `RoomResponse` with a fresh UUID was returned, potentially overwriting the existing room.
 - **Fix:** Separated room initialization logic to avoid regenerating the `roomId` if it already exists. Now the host's room ID is preserved and reused properly.
 
-### 🛠️ 2. Host Player Not Added to Game State
+### 2. Host Player Not Added to Game State
 - **Issue:** The host (creator) was not automatically added to the `GameState`, causing `startGame` to fail due to insufficient players.
 - **Fix:** Updated the `createRoom` logic to add the host player to both the room and the corresponding game state immediately during initialization.
+
+### 3.GameState Switching twice while playing 
+- **Issue:** The host (creator) was always picking up the word and guest (player 2) was always gueeessing
+- **Fix** : Added the decriptive answer in [Feature]#1
 
 ---
 
@@ -24,10 +28,13 @@ This project enables real-time multiplayer gameplay using WebSockets (STOMP over
 - Game state management with backend sync
 - Options Added to choose Word / turn based option to choose Word
 
+- Guess logic from ChatOption and validatiton (Completed) 
+
 ---
 ## Next Feature 
 
-- Guess logic from ChatOption and validatiton 
+- Quality of life : ScoreBoard 
+- Quality of life : GAME END and declaring winner
 
 
 ## 🧪 How to Test

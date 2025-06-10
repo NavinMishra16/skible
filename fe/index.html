@@ -4,54 +4,18 @@
   <meta charset="UTF-8">
   <title>Skible Chat & Ready</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-    .word-option-btn {
-      background: #007bff;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 12px;
-      margin: 4px;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-    .word-option-btn:hover {
-      background: #0056b3;
-    }
-    #wordOptionsPanel {
-      border: 1px solid #ddd;
-      padding: 10px;
-      border-radius: 4px;
-      background-color: #f9f9f9;
-    }
-    .system-message {
-      color: #6c757d;
-      font-style: italic;
-    }
-    .current-player {
-      font-weight: bold;
-      color: #28a745;
-    }
-    .debug {
-      font-family: monospace;
-      background: #f8f9fa;
-      padding: 5px;
-      border: 1px solid #ddd;
-      display: none;
-    }
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+    .word-option-btn { background: #007bff; color: white; border: none; padding: 8px 12px; margin: 4px; cursor: pointer; border-radius: 4px; transition: background .2s; }
+    .word-option-btn:hover { background: #0056b3; }
+    #wordOptionsPanel, #guessPanel { border: 1px solid #ddd; padding: 10px; border-radius: 4px; background: #f9f9f9; display: none; margin-top: 20px; }
+    .system-message { color: #6c757d; font-style: italic; }
   </style>
 </head>
 <body>
   <h2>Skible Chat & Ready</h2>
-
   <div id="lobby">
-    <input id="nameInput" type="text" placeholder="Enter your name" />
-    <input id="roomInput" type="text" placeholder="Enter room ID (to join)" />
+    <input id="nameInput" placeholder="Enter your name" />
+    <input id="roomInput" placeholder="Enter room ID (to join)" />
     <button id="createBtn">Create Room</button>
     <button id="joinBtn">Join Room</button>
   </div>
@@ -59,53 +23,31 @@
   <div id="chat-container" style="display:none; margin-top:20px;">
     <p>Connected as <strong id="status"></strong></p>
     <p>Room ID: <strong id="currentRoom"></strong></p>
-
     <div id="chatArea" style="border:1px solid #ccc; height:200px; overflow-y:auto; padding:10px; margin-bottom:10px;"></div>
-    <div id="chatControls" style="display:flex; margin-bottom:10px;">
-      <input id="chatInput" type="text" placeholder="Type a message..." style="flex:1;" />
+    <div style="display:flex; margin-bottom:10px;">
+      <input id="chatInput" placeholder="Type a message..." style="flex:1;" />
       <button id="chatBtn">Send</button>
     </div>
-
-    <div id="readyControls" style="margin-bottom:10px;">
+    <div style="margin-bottom:10px;">
       <button id="readyBtn">Ready</button>
       <span id="readyStatus">Not ready</span>
     </div>
     <div id="gameLog" style="border:1px solid #999; padding:10px; height:150px; overflow-y:auto;"></div>
 
-    <div id="wordOptionsPanel" style="display:none; margin-top:20px;">
-      <h4>Pick one of these words:</h4>
-      <div id="wordOptionsButtons"></div>
-    </div>
+    <div id="wordOptionsPanel"><h4>Pick one of these words:</h4><div id="wordOptionsButtons"></div></div>
+    <div id="guessPanel"><h4 id="guessPrompt"></h4><input id="guessInput" placeholder="Type your guess…" /><button id="guessBtn">Submit Guess</button></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
   <script>
-    let stompClient, playerName, roomId;
-    let isReady = false;
-    let currentPlayer = null;
-    const readyPlayers = new Set();
+    let stompClient, playerName, roomId, currentPhase, currentPlayer, isGuessPhase = false;
 
-    function connect(callback) {
+    function connect(cb) {
       const socket = new SockJS('http://localhost:3001/ws');
       stompClient = Stomp.over(socket);
-      
-      // Configure STOMP client to use Principal (username)
-      const connectHeaders = {
-        login: playerName,
-        passcode: ''  // No password needed for this simple demo
-      };
-      
-      stompClient.debug = function(str) {
-        // Uncomment for debugging
-        // console.log("STOMP:", str);
-      };
-      stompClient.connect(connectHeaders, callback, onError);
-    }
-    
-    function onError(error) {
-      console.error("STOMP connection error:", error);
-      alert("Connection error: " + error);
+      stompClient.debug = () => {};
+      stompClient.connect({}, cb, err => alert('STOMP error: ' + err));
     }
 
     function setupUI() {
@@ -116,178 +58,141 @@
     }
 
     function addMessage(text) {
-      const chat = document.getElementById('chatArea');
-      const p = document.createElement('p'); 
+      const c = document.getElementById('chatArea'), p = document.createElement('p');
       p.innerText = text;
-      chat.appendChild(p);
-      chat.scrollTop = chat.scrollHeight;
+      c.appendChild(p);
+      c.scrollTop = c.scrollHeight;
     }
 
-    function logGameEvent(text, isSystem = false) {
-      const log = document.getElementById('gameLog');
-      const p = document.createElement('p'); 
+    function logGameEvent(text, sys = false) {
+      const log = document.getElementById('gameLog'), p = document.createElement('p');
       p.innerText = text;
-      if (isSystem) {
-        p.className = 'system-message';
-      }
+      if (sys) p.classList.add('system-message');
       log.appendChild(p);
       log.scrollTop = log.scrollHeight;
     }
 
     function subscribeToChat() {
-      stompClient.subscribe(`/topic/room/${roomId}/chat`, frame => {
-        const payload = JSON.parse(frame.body);
-        const sender = payload.sender || payload.playerName;
-        addMessage(`${sender}: ${payload.content}`);
+      stompClient.subscribe(`/topic/room/${roomId}/chat`, f => {
+        const d = JSON.parse(f.body);
+        addMessage(`${d.sender || d.playerName}: ${d.content}`);
       });
     }
 
     function subscribeToReady() {
-      stompClient.subscribe(`/topic/room/${roomId}/player-ready`, frame => {
-        const data = JSON.parse(frame.body);
-        logGameEvent(`Player ${data.playerName} is ${data.ready ? 'ready' : 'not ready'}`);
-        if (data.ready) {
-          readyPlayers.add(data.playerName);
-        } else {
-          readyPlayers.delete(data.playerName);
-        }
+      stompClient.subscribe(`/topic/room/${roomId}/player-ready`, f => {
+        const d = JSON.parse(f.body);
+        logGameEvent(`Player ${d.playerName} is ${d.ready ? 'ready' : 'not ready'}`, true);
       });
     }
 
     function subscribeToGameStarted() {
-      stompClient.subscribe(`/topic/room/${roomId}/game-started`, frame => {
-        const data = JSON.parse(frame.body);
-        logGameEvent("🎮 Game Started!", true);
-        
-        // Clear word options panel from previous games
+      stompClient.subscribe(`/topic/room/${roomId}/game-started`, () => {
+        logGameEvent('🎮 Game Started!', true);
         document.getElementById('wordOptionsPanel').style.display = 'none';
+        document.getElementById('guessPanel').style.display = 'none';
       });
     }
 
     function subscribeToTurnStart() {
-      stompClient.subscribe(`/topic/room/${roomId}/turn-start`, frame => {
-        const data = JSON.parse(frame.body);
-        currentPlayer = data.currentPlayer;
-        
-        // Log who's turn it is
-        logGameEvent(`✋ It's now ${currentPlayer}'s turn`, true);
-        
-        // Clear any previous word options
+      stompClient.subscribe(`/topic/room/${roomId}/turn-start`, f => {
+        const d = JSON.parse(f.body);
+        currentPlayer = d.currentPlayer;
+        currentPhase = d.phase;
+        logGameEvent(`✋ ${currentPlayer}’s turn to ${currentPhase.toLowerCase()}`, true);
         document.getElementById('wordOptionsPanel').style.display = 'none';
-        
-        // If it's my turn, request word options
+        document.getElementById('guessPanel').style.display = 'none';
+        isGuessPhase = false;
+
         if (currentPlayer === playerName) {
-          logGameEvent(`It's your turn! Requesting word options...`, true);
-          
-          // Request word options after a short delay
-          setTimeout(() => {
-            requestWordOptions();
-          }, 500);
+          if (currentPhase === 'PICK') {
+            logGameEvent('📥 It’s your PICK phase. Getting options...', true);
+            stompClient.send('/app/get-word-options', {}, JSON.stringify({ roomId, playerName }));
+          } else if (currentPhase === 'GUESS') {
+            logGameEvent('🔎 It’s your GUESS phase. Type your guess into chat.', true);
+            isGuessPhase = true;
+            document.getElementById('guessPrompt').innerText = 'Enter your guess and hit Send';
+            document.getElementById('guessPanel').style.display = 'block';
+          }
         } else {
-          logGameEvent(`Waiting for ${currentPlayer} to choose a word...`, true);
+          logGameEvent(`⏳ Waiting on ${currentPlayer}`, true);
         }
       });
     }
 
     function subscribeToWordOptions() {
-      stompClient.subscribe(`/topic/room/${roomId}/word-options`, frame => {
-        console.log("Word options received:", frame.body);
-        const data = JSON.parse(frame.body);
-        
-        // Only show word options if it's my turn
-        if (currentPlayer === playerName) {
-          if (data.options && data.options.length > 0) {
-            console.log("Rendering word options:", data.options);
-            renderWordOptions(data.options);
-          } else {
-            console.error("Received empty word options");
-            logGameEvent('No word options available', true);
-          }
-        } else {
-          console.log("Received word options but it's not my turn");
-        }
+      stompClient.subscribe(`/topic/room/${roomId}/word-options`, f => {
+        const d = JSON.parse(f.body);
+        if (currentPhase === 'PICK' && currentPlayer === playerName) renderWordOptions(d.options);
       });
     }
-    
+
     function subscribeToWordChosen() {
-      stompClient.subscribe(`/topic/room/${roomId}/word-chosen`, frame => {
-        const data = JSON.parse(frame.body);
-        logGameEvent(`Word chosen: ${data.chosenWord}`, true);
+      stompClient.subscribe(`/topic/room/${roomId}/word-chosen`, f => {
+        const d = JSON.parse(f.body);
+        logGameEvent(`🎯 Word picked: ${d.chosenWord}`, true);
       });
     }
-    
+
+    function subscribeToGuessRequest() {
+      stompClient.subscribe(`/topic/room/${roomId}/guess-request`, f => {
+        const d = JSON.parse(f.body);
+        logGameEvent(`🔍 ${d.playerToGuess}, ${d.prompt}`, true);
+      });
+    }
+
+    function subscribeToGuessResult() {
+      stompClient.subscribe(`/topic/room/${roomId}/guess-result`, f => {
+        const d = JSON.parse(f.body);
+        logGameEvent(`${d.playerName} guessed “${d.guess}” — ${d.correct ? '✅ correct' : '❌ wrong'}`, true);
+        isGuessPhase = false;
+        document.getElementById('guessPanel').style.display = 'none';
+      });
+    }
+
     function subscribeToGameState() {
-      stompClient.subscribe(`/topic/room/${roomId}/game-state`, frame => {
-        // You can use this to update UI with game progress if needed
-        console.log("Game state update:", JSON.parse(frame.body));
+      stompClient.subscribe(`/topic/room/${roomId}/game-state`, f => {
+        // optional: visualize state
       });
     }
 
-    function requestWordOptions() {
-      console.log("Requesting word options as player:", playerName);
-      
-      // Add debugging info to the game log
-      logGameEvent(`Requesting word options...`, true);
-      
-      stompClient.send('/app/get-word-options', {}, JSON.stringify({ 
-        roomId,
-        playerName: playerName  // Include playerName explicitly since Principal isn't working
-      }));
-    }
-
-    function renderWordOptions(options) {
-      const panel = document.getElementById('wordOptionsPanel');
-      const container = document.getElementById('wordOptionsButtons');
-      container.innerHTML = '';
-
-      if (!options || options.length === 0) {
-        logGameEvent('No word options available', true);
-        return;
-      }
-
-      // Log to console and game log for debugging
-      console.log(`Showing word options to ${playerName}:`, options);
-      logGameEvent(`Your turn! Choose one of these words: ${options.join(', ')}`, true);
-
-      options.forEach(word => {
-        const btn = document.createElement('button');
-        btn.className = 'word-option-btn';
-        btn.innerText = word;
-        btn.addEventListener('click', () => {
-          stompClient.send('/app/pick-word', {}, JSON.stringify({ 
-            roomId, 
-            chosenWord: word,
-            playerName: playerName // Add playerName to handle null Principal
-          }));
-          logGameEvent(`You selected the word: ${word}`);
-          panel.style.display = 'none';
-        });
-        container.appendChild(btn);
-      });
-
-      panel.style.display = 'block';
-    }
-
-    // Set up all subscriptions
     function setupSubscriptions() {
       subscribeToChat();
       subscribeToReady();
       subscribeToGameStarted();
       subscribeToTurnStart();
-      subscribeToWordOptions(); // This subscription handles showing word options
+      subscribeToWordOptions();
       subscribeToWordChosen();
+      subscribeToGuessRequest();
+      subscribeToGuessResult();
       subscribeToGameState();
+    }
+
+    function renderWordOptions(options) {
+      const panel = document.getElementById('wordOptionsPanel'),
+            ctr = document.getElementById('wordOptionsButtons');
+      ctr.innerHTML = '';
+      options.forEach(w => {
+        const btn = document.createElement('button');
+        btn.className = 'word-option-btn';
+        btn.innerText = w;
+        btn.onclick = () => {
+          stompClient.send('/app/pick-word', {}, JSON.stringify({ roomId, playerName, chosenWord: w }));
+          logGameEvent(`✅ You picked: ${w}`, true);
+          panel.style.display = 'none';
+        };
+        ctr.appendChild(btn);
+      });
+      panel.style.display = 'block';
     }
 
     document.getElementById('createBtn').onclick = () => {
       playerName = document.getElementById('nameInput').value.trim();
       if (!playerName) return alert('Enter your name');
-
       connect(() => {
-        const roomCreatedSub = stompClient.subscribe('/topic/room-created', msg => {
-          roomCreatedSub.unsubscribe();
-          const data = JSON.parse(msg.body);
-          roomId = data.roomId;
+        const subs = stompClient.subscribe('/topic/room-created', msg => {
+          subs.unsubscribe();
+          roomId = JSON.parse(msg.body).roomId;
           setupUI();
           setupSubscriptions();
         });
@@ -298,47 +203,38 @@
     document.getElementById('joinBtn').onclick = () => {
       playerName = document.getElementById('nameInput').value.trim();
       roomId = document.getElementById('roomInput').value.trim();
-      if (!playerName || !roomId) return alert('Enter both name and room ID');
-
+      if (!playerName || !roomId) return alert('Enter both');
       connect(() => {
-        setupUI();
-        setupSubscriptions();
+        setupUI(); setupSubscriptions();
         stompClient.send('/app/join-room', {}, JSON.stringify({ playerName, roomId }));
       });
     };
 
     document.getElementById('chatBtn').onclick = () => {
-      const msg = document.getElementById('chatInput').value.trim();
+      const input = document.getElementById('chatInput');
+      const msg = input.value.trim();
       if (!msg) return;
-      stompClient.send('/app/chat', {}, JSON.stringify({ roomId, sender: playerName, content: msg }));
-      document.getElementById('chatInput').value = '';
+
+      if (isGuessPhase && currentPhase === 'GUESS' && currentPlayer === playerName) {
+        stompClient.send('/app/make-guess', {}, JSON.stringify({ roomId, playerName, guess: msg }));
+      } else {
+        stompClient.send('/app/chat', {}, JSON.stringify({ roomId, sender: playerName, content: msg }));
+      }
+      input.value = '';
     };
 
-    // Add Enter key handler for chat
-    document.getElementById('chatInput').addEventListener('keypress', event => {
-      if (event.key === 'Enter') {
-        document.getElementById('chatBtn').click();
-      }
-    });
-
     document.getElementById('readyBtn').onclick = () => {
-      fetch('http://localhost:3001/api/player-ready', {
+      fetch(`http://localhost:3001/api/player-ready`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ roomId, playerName })
       })
-      .then(res => res.text().then(text => text ? JSON.parse(text) : {}))
+      .then(res => res.json())
       .then(data => {
-        if (data.ready !== undefined) {
-          isReady = data.ready;
-          document.getElementById('readyStatus').innerText = isReady ? 'Ready' : 'Not ready';
-          document.getElementById('readyBtn').innerText = isReady ? 'Unready' : 'Ready';
-        }
+        document.getElementById('readyStatus').innerText = data.ready ? 'Ready' : 'Not ready';
+        document.getElementById('readyBtn').innerText = data.ready ? 'Unready' : 'Ready';
       })
-      .catch(err => {
-        console.error("Error toggling ready status:", err);
-        alert("Error: " + err.message);
-      });
+      .catch(e => alert(e));
     };
   </script>
 </body>

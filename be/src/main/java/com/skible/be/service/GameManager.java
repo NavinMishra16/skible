@@ -1,15 +1,15 @@
 package com.skible.be.service;
+import com.skible.be.service.GameManager;
+import com.skible.be.dto.GameStateResponse;
+import com.skible.be.dto.RoomResponse;
+import com.skible.be.service.GameStateService;
+import com.skible.be.service.WordService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
-import com.skible.be.dto.GameState;
-import com.skible.be.dto.GameStateResponse;
-import com.skible.be.dto.RoomResponse;
-import com.skible.be.enums.RoundResult;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 
 @Service
 public class GameManager {
@@ -20,24 +20,19 @@ public class GameManager {
     @Autowired
     public GameManager(GameStateService gameStateService, WordService wordService) {
         this.gameStateService = gameStateService;
-        this.wordService = wordService;
+        this.wordService      = wordService;
     }
 
-    /**
-     * Creates a new game room with the given host player
-     */
     public RoomResponse createRoom(String hostPlayer) {
         RoomResponse room = new RoomResponse();
         room.addPlayer(hostPlayer);
         rooms.put(room.getRoomId(), room);
+
         gameStateService.initializeGame(room.getRoomId());
-        gameStateService.addPlayerToGame(room.getRoomId(),hostPlayer);
+        gameStateService.addPlayerToGame(room.getRoomId(), hostPlayer);
         return room;
     }
 
-    /**
-     * Adds a player to an existing room
-     */
     public RoomResponse joinRoom(String roomId, String playerName) {
         RoomResponse room = rooms.get(roomId);
         if (room != null) {
@@ -47,91 +42,65 @@ public class GameManager {
         return room;
     }
 
-    // toggle Players to Start the Game
-     public  boolean togglePlayerReady(String roomId, String playerName){
-        return gameStateService.togglePlayerReady(roomId,playerName);
-     }
-     // Check all players are ready or not
-    public  boolean allPlayerReady(String roomId){
-        return gameStateService.allPlayersReady(roomId);
-    }
-    /**
-     * Starts a game in the specified room
-     */
-    public GameStateResponse startGame(String roomId) {
-        GameState state = gameStateService.startGame(roomId);
-        return new GameStateResponse(state, null);
+    public boolean togglePlayerReady(String roomId, String playerName) {
+        return gameStateService.togglePlayerReady(roomId, playerName);
     }
 
-    /*
-     * Only let the current player choose the word
-     */
-    public List<String> getWordOptionsForRoom(String roomId, String requester){
-        String current = gameStateService.getCurrentPlayer(roomId);
-        if(!current.equals(requester)){
-            throw new IllegalStateException("Not your Turn");
+    public boolean allPlayerReady(String roomId) {
+        return gameStateService.allPlayersReady(roomId);
+    }
+
+    public GameStateResponse startGame(String roomId) {
+        return new GameStateResponse(
+                gameStateService.startGame(roomId),
+                null
+        );
+    }
+
+    public List<String> getWordOptionsForRoom(String roomId, String requester) {
+        if (!gameStateService.getCurrentPlayer(roomId).equals(requester)) {
+            throw new IllegalStateException("Not your turn to pick");
         }
         return wordService.pickN(3);
     }
 
-    /*
-     * Record the word advance the turn and choose next player
-     */
-    public String chooseWordAndAdvance(String roomId,String chooser,String word){
-        String current = gameStateService.getCurrentPlayer(roomId);
-        if(!current.equals(chooser)){
-            throw new IllegalStateException("Not your Turn");
+    /** Record the word and switch to the guesser */
+    public String chooseWordAndAdvance(String roomId, String chooser, String word) {
+
+        if (!gameStateService.getCurrentPicker(roomId).equals(chooser)) {
+            throw new IllegalStateException("Not your turn to pick");
         }
-        gameStateService.updateChosenWord(roomId,word);
+        gameStateService.updateChosenWord(roomId, word);
         return gameStateService.advanceTurn(roomId);
     }
 
-
-    /**
-     * Moves the game to the next round with the given result
-     */
-    public GameStateResponse nextRound(String roomId, RoundResult result) {
-        GameState state = gameStateService.nextRound(roomId, result);
-        return new GameStateResponse(state, null);
+    /** Validate the guess (must match currentPlayer), but do not flip here */
+    public boolean processGuess(String roomId, String guesser, String guess) {
+        if (!gameStateService.getCurrentGuesser(roomId).equals(guesser)) {
+            throw new IllegalStateException("Not your turn to guess");
+        }
+        String secret = gameStateService.getChosenWord(roomId);
+        return secret != null && secret.equalsIgnoreCase(guess);
     }
 
-    /**
-     * Gets a list of word options for players to choose from
-     */
-    public List<String> getWordOptions(int count) {
-        return wordService.pickN(count);
+    /** After the guess, switch to the next picker */
+    public String advanceAfterGuess(String roomId) {
+        return gameStateService.advanceToNextRound(roomId);
     }
 
-    /**
-     * Sets the chosen word for a specific room
-     */
-    public GameStateResponse setChosenWord(String roomId, String chosenWord) {
-        GameState state = gameStateService.updateChosenWord(roomId, chosenWord);
-        return new GameStateResponse(state, chosenWord);
+    public String getCurrentPicker(String roomId){
+         return gameStateService.getCurrentPicker(roomId);
+    }
+    public String getCurrentGuesser(String roomId){
+        return gameStateService.getCurrentGuesser(roomId);
     }
 
-    /**
-     * Gets the current game state
-     */
+    /** So your controller can broadcast the full state when needed */
     public GameStateResponse getGameState(String roomId) {
-        GameState state = gameStateService.getState(roomId);
-        String chosenWord = gameStateService.getChosenWord(roomId);
-        return new GameStateResponse(state, chosenWord);
+        return new GameStateResponse(
+                gameStateService.getState(roomId),
+                gameStateService.getChosenWord(roomId)
+        );
     }
-
-    /**
-     * Checks if the game has ended
-     */
-    public boolean isGameEnded(String roomId) {
-        return gameStateService.isGameEnded(roomId);
-    }
-
-    /**
-     * Gets the winner of the game if it has ended
-     */
-    public String getWinner(String roomId) {
-        return gameStateService.getWinner(roomId);
-    }
-
-
 }
+
