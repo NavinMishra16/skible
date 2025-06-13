@@ -16,11 +16,12 @@ public class GameManager {
     private final Map<String, RoomResponse> rooms = new ConcurrentHashMap<>();
     private final GameStateService gameStateService;
     private final WordService wordService;
-
+    private final ScoreBoardService scoreBoardService;
     @Autowired
-    public GameManager(GameStateService gameStateService, WordService wordService) {
+    public GameManager(GameStateService gameStateService, WordService wordService,ScoreBoardService scoreBoardService) {
         this.gameStateService = gameStateService;
         this.wordService      = wordService;
+        this.scoreBoardService = scoreBoardService;
     }
 
     public RoomResponse createRoom(String hostPlayer) {
@@ -50,7 +51,12 @@ public class GameManager {
         return gameStateService.allPlayersReady(roomId);
     }
 
+
     public GameStateResponse startGame(String roomId) {
+        RoomResponse room = rooms.get(roomId);
+        if(room !=null){
+            scoreBoardService.initializeScore(roomId,room.getPlayers());
+        }
         return new GameStateResponse(
                 gameStateService.startGame(roomId),
                 null
@@ -80,7 +86,11 @@ public class GameManager {
             throw new IllegalStateException("Not your turn to guess");
         }
         String secret = gameStateService.getChosenWord(roomId);
-        return secret != null && secret.equalsIgnoreCase(guess);
+        boolean correct =  secret != null && secret.equalsIgnoreCase(guess);
+        if(correct){
+            scoreBoardService.incrementPlayerScore(roomId,guesser);
+        }
+        return correct;
     }
 
     /** After the guess, switch to the next picker */
@@ -93,6 +103,25 @@ public class GameManager {
     }
     public String getCurrentGuesser(String roomId){
         return gameStateService.getCurrentGuesser(roomId);
+    }
+
+    public Map<String, Integer> getScores(String roomId) {
+        return scoreBoardService.getAllScores(roomId);
+    }
+
+    /** Get score for a specific player */
+    public int getPlayerScore(String roomId, String playerName) {
+        return scoreBoardService.getPlayerScore(roomId, playerName);
+    }
+
+    /** Reset scores for a room */
+    public void resetScores(String roomId) {
+        scoreBoardService.resetScores(roomId);
+    }
+
+    /** Manually increment a player's score (for special cases) */
+    public void incrementPlayerScore(String roomId, String playerName) {
+        scoreBoardService.incrementPlayerScore(roomId, playerName);
     }
 
     /** So your controller can broadcast the full state when needed */

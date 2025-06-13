@@ -6,8 +6,6 @@ public class GameStateRequest {
     private String roomId;
     private RoundResult roundResult;
     private String playerName;
-
-    // ← NEW:
     private String guess;
 
     public GameStateRequest() {}

@@ -1,10 +1,10 @@
 package com.skible.be.dto;
-
 import com.skible.be.enums.RoundResult;
 import com.skible.be.enums.GameStatus;
-
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class GameState {
     private String roomId;
@@ -13,6 +13,7 @@ public class GameState {
     private int currentPlayerIndex = 0; // Track which player's turn it is
     private GameStatus status = GameStatus.WAITING_FOR_PLAYERS;
     private RoundResult lastRoundResult = RoundResult.PENDING;
+    private Map<String,Integer>playerScore = new HashMap<>();
 
     public GameState() {}
 
