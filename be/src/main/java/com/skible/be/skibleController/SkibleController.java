@@ -26,10 +26,18 @@ public class SkibleController {
               GameManager gameManager,
               GameStateService gameStateService,
               SimpMessagingTemplate messagingTemplate
-      ) {
+      ){
             this.gameManager      = gameManager;
             this.gameStateService = gameStateService;
             this.messagingTemplate = messagingTemplate;
+      }
+      // Helper Method to BroadCast the score of current room
+      private void broadCastScore(String roomId){
+            Map<String,Integer>scores = gameManager.getScores(roomId);
+            messagingTemplate.convertAndSend(
+                    "/topic/room/" + roomId + "/scores",
+                    scores
+            );
       }
 
       //──────────────────────────────────────────────────────────────────
@@ -92,7 +100,6 @@ public class SkibleController {
                           )
                   );
             }
-
             return ResponseEntity.ok().build();
       }
 
@@ -165,6 +172,19 @@ public class SkibleController {
                             correct
                     )
             );
+            // 3) if Guess is right,broadCast updateScore
+            if(correct){
+                  broadCastScore(req.getRoomId());
+                  messagingTemplate.convertAndSend(
+                          "/topic/room/" +
+                                  "/score-update",
+                          Map.of(
+                                  "guesser", req.getPlayerName(),
+                                  "word" , req.getGuess(),
+                                  "message" , req.getPlayerName() + "earned a point"
+                          )
+                  );
+            }
 
             // 3) Advance to next round after guess
             String nextPicker = gameManager.advanceAfterGuess(req.getRoomId());
@@ -177,6 +197,7 @@ public class SkibleController {
                             "phase", "PICK"
                     )
             );
+
 
             // 5) immediately send word-options for next pick
             List<String> opts = gameManager.getWordOptionsForRoom(req.getRoomId(), nextPicker);

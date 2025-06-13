@@ -9,6 +9,10 @@
     .word-option-btn:hover { background: #0056b3; }
     #wordOptionsPanel, #guessPanel { border: 1px solid #ddd; padding: 10px; border-radius: 4px; background: #f9f9f9; display: none; margin-top: 20px; }
     .system-message { color: #6c757d; font-style: italic; }
+    #scoresPanel { border: 1px solid #28a745; padding: 10px; border-radius: 4px; background: #d4edda; margin-top: 10px; }
+    .score-item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #c3e6cb; }
+    .score-item:last-child { border-bottom: none; }
+    .score-update { background: #fff3cd; border: 1px solid #ffeaa7; padding: 8px; border-radius: 4px; margin: 5px 0; color: #856404; }
   </style>
 </head>
 <body>
@@ -23,6 +27,15 @@
   <div id="chat-container" style="display:none; margin-top:20px;">
     <p>Connected as <strong id="status"></strong></p>
     <p>Room ID: <strong id="currentRoom"></strong></p>
+    
+    <!-- Scores Panel -->
+    <div id="scoresPanel">
+      <h4>🏆 Scores</h4>
+      <div id="scoresContainer">
+        <p>No scores yet</p>
+      </div>
+    </div>
+
     <div id="chatArea" style="border:1px solid #ccc; height:200px; overflow-y:auto; padding:10px; margin-bottom:10px;"></div>
     <div style="display:flex; margin-bottom:10px;">
       <input id="chatInput" placeholder="Type a message..." style="flex:1;" />
@@ -72,6 +85,37 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    function updateScores(scores) {
+      const container = document.getElementById('scoresContainer');
+      if (!scores || Object.keys(scores).length === 0) {
+        container.innerHTML = '<p>No scores yet</p>';
+        return;
+      }
+
+      // Convert scores object to array and sort by score (descending)
+      const sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      
+      container.innerHTML = '';
+      sortedScores.forEach(([player, score]) => {
+        const scoreItem = document.createElement('div');
+        scoreItem.className = 'score-item';
+        scoreItem.innerHTML = `
+          <span>${player}</span>
+          <span><strong>${score}</strong></span>
+        `;
+        container.appendChild(scoreItem);
+      });
+    }
+
+    function showScoreUpdate(updateData) {
+      const chatArea = document.getElementById('chatArea');
+      const updateDiv = document.createElement('div');
+      updateDiv.className = 'score-update';
+      updateDiv.innerHTML = `🎉 ${updateData.guesser} guessed "${updateData.word}" correctly and earned a point!`;
+      chatArea.appendChild(updateDiv);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
     function subscribeToChat() {
       stompClient.subscribe(`/topic/room/${roomId}/chat`, f => {
         const d = JSON.parse(f.body);
@@ -96,34 +140,61 @@
 
     function subscribeToTurnStart() {
       stompClient.subscribe(`/topic/room/${roomId}/turn-start`, f => {
-        const d = JSON.parse(f.body);
-        currentPlayer = d.currentPlayer;
-        currentPhase = d.phase;
-        logGameEvent(`✋ ${currentPlayer}’s turn to ${currentPhase.toLowerCase()}`, true);
-        document.getElementById('wordOptionsPanel').style.display = 'none';
-        document.getElementById('guessPanel').style.display = 'none';
-        isGuessPhase = false;
-
-        if (currentPlayer === playerName) {
-          if (currentPhase === 'PICK') {
-            logGameEvent('📥 It’s your PICK phase. Getting options...', true);
-            stompClient.send('/app/get-word-options', {}, JSON.stringify({ roomId, playerName }));
-          } else if (currentPhase === 'GUESS') {
-            logGameEvent('🔎 It’s your GUESS phase. Type your guess into chat.', true);
-            isGuessPhase = true;
-            document.getElementById('guessPrompt').innerText = 'Enter your guess and hit Send';
-            document.getElementById('guessPanel').style.display = 'block';
+        try {
+          const d = JSON.parse(f.body);
+          
+          // Validate the data before using it
+          if (!d || !d.currentPlayer || !d.phase) {
+            console.error('Invalid turn-start data:', d);
+            return;
           }
-        } else {
-          logGameEvent(`⏳ Waiting on ${currentPlayer}`, true);
+          
+          currentPlayer = d.currentPlayer;
+          currentPhase = d.phase;
+          
+          logGameEvent(`✋ ${currentPlayer}'s turn to ${currentPhase.toLowerCase()}`, true);
+          document.getElementById('wordOptionsPanel').style.display = 'none';
+          document.getElementById('guessPanel').style.display = 'none';
+          isGuessPhase = false;
+
+          if (currentPlayer === playerName) {
+            if (currentPhase === 'PICK') {
+              logGameEvent("📥 It's your PICK phase. Getting options...", true);
+              stompClient.send('/app/get-word-options', {}, JSON.stringify({ roomId: roomId, playerName: playerName }));
+            } else if (currentPhase === 'GUESS') {
+              logGameEvent("🔎 It's your GUESS phase. Type your guess into chat.", true);
+              isGuessPhase = true;
+              document.getElementById('guessPrompt').innerText = 'Enter your guess and hit Send';
+              document.getElementById('guessPanel').style.display = 'block';
+            }
+          } else if (currentPlayer) {
+            logGameEvent(`⏳ Waiting on ${currentPlayer}`, true);
+          }
+        } catch (error) {
+          console.error('Error processing turn-start message:', error);
+          logGameEvent('❌ Error processing turn information', true);
         }
       });
     }
 
     function subscribeToWordOptions() {
       stompClient.subscribe(`/topic/room/${roomId}/word-options`, f => {
-        const d = JSON.parse(f.body);
-        if (currentPhase === 'PICK' && currentPlayer === playerName) renderWordOptions(d.options);
+        try {
+          const d = JSON.parse(f.body);
+          
+          // Add validation to ensure we have options and it's the right phase
+          if (!d || !d.options || !Array.isArray(d.options)) {
+            console.error('Invalid word options data:', d);
+            return;
+          }
+          
+          if (currentPhase === 'PICK' && currentPlayer === playerName) {
+            renderWordOptions(d.options);
+          }
+        } catch (error) {
+          console.error('Error processing word options:', error);
+          logGameEvent('❌ Error loading word options', true);
+        }
       });
     }
 
@@ -144,15 +215,41 @@
     function subscribeToGuessResult() {
       stompClient.subscribe(`/topic/room/${roomId}/guess-result`, f => {
         const d = JSON.parse(f.body);
-        logGameEvent(`${d.playerName} guessed “${d.guess}” — ${d.correct ? '✅ correct' : '❌ wrong'}`, true);
+        logGameEvent(`${d.playerName} guessed "${d.guess}" — ${d.correct ? '✅ correct' : '❌ wrong'}`, true);
         isGuessPhase = false;
         document.getElementById('guessPanel').style.display = 'none';
+      });
+    }
+
+    function subscribeToScores() {
+      // Subscribe to score updates - note: there's an issue in your backend broadcast
+      // The topic should include the roomId, but your code sends to "/topic/room//scores"
+      stompClient.subscribe(`/topic/room/${roomId}/scores`, f => {
+        const scores = JSON.parse(f.body);
+        updateScores(scores);
+      });
+      
+    }
+
+    function subscribeToScoreUpdate() {
+      // Subscribe to score update notifications
+      stompClient.subscribe(`/topic/room//score-update`, f => {
+        const updateData = JSON.parse(f.body);
+        showScoreUpdate(updateData);
+      });
+      
+      // Also try with correct roomId topic
+      stompClient.subscribe(`/topic/room/${roomId}/score-update`, f => {
+        const updateData = JSON.parse(f.body);
+        showScoreUpdate(updateData);
       });
     }
 
     function subscribeToGameState() {
       stompClient.subscribe(`/topic/room/${roomId}/game-state`, f => {
         // optional: visualize state
+        const gameState = JSON.parse(f.body);
+        console.log('Game state updated:', gameState);
       });
     }
 
@@ -166,6 +263,8 @@
       subscribeToGuessRequest();
       subscribeToGuessResult();
       subscribeToGameState();
+      subscribeToScores();
+      subscribeToScoreUpdate();
     }
 
     function renderWordOptions(options) {
@@ -223,19 +322,50 @@
       input.value = '';
     };
 
+    document.getElementById('guessBtn').onclick = () => {
+      const input = document.getElementById('guessInput');
+      const guess = input.value.trim();
+      if (!guess) return;
+
+      stompClient.send('/app/make-guess', {}, JSON.stringify({ roomId, playerName, guess }));
+      input.value = '';
+    };
+
     document.getElementById('readyBtn').onclick = () => {
       fetch(`http://localhost:3001/api/player-ready`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ roomId, playerName })
       })
-      .then(res => res.json())
-      .then(data => {
-        document.getElementById('readyStatus').innerText = data.ready ? 'Ready' : 'Not ready';
-        document.getElementById('readyBtn').innerText = data.ready ? 'Unready' : 'Ready';
+      .then(res => {
+        if (!res.ok) {
+          throw new Error('Network response was not ok');
+        }
+        // Since your backend returns ResponseEntity.ok().build(), there's no JSON body
+        // We need to track ready state on frontend or modify backend to return the state
+        const currentStatus = document.getElementById('readyStatus').innerText;
+        const newReady = currentStatus === 'Not ready';
+        document.getElementById('readyStatus').innerText = newReady ? 'Ready' : 'Not ready';
+        document.getElementById('readyBtn').innerText = newReady ? 'Unready' : 'Ready';
       })
-      .catch(e => alert(e));
+      .catch(e => {
+        console.error('Ready button error:', e);
+        alert('Error toggling ready state: ' + e.message);
+      });
     };
+
+    // Add guess functionality to chat input when Enter is pressed
+    document.getElementById('chatInput').addEventListener('keypress', e => {
+      if (e.key === 'Enter') {
+        document.getElementById('chatBtn').click();
+      }
+    });
+
+    document.getElementById('guessInput').addEventListener('keypress', e => {
+      if (e.key === 'Enter') {
+        document.getElementById('guessBtn').click();
+      }
+    });
   </script>
 </body>
 </html>

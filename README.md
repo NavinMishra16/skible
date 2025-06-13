@@ -18,6 +18,7 @@ This project enables real-time multiplayer gameplay using WebSockets (STOMP over
 - **Issue:** The host (creator) was always picking up the word and guest (player 2) was always gueeessing
 - **Fix** : Added the decriptive answer in [Feature]#1
 
+
 ---
 
 ##  Features Summary
@@ -29,11 +30,9 @@ This project enables real-time multiplayer gameplay using WebSockets (STOMP over
 - Options Added to choose Word / turn based option to choose Word
 
 - Guess logic from ChatOption and validatiton (Completed) 
-
+- Added scoreboard Featured #3 (Completed)
 ---
 ## Next Feature 
-
-- Quality of life : ScoreBoard 
 - Quality of life : GAME END and declaring winner
 
 

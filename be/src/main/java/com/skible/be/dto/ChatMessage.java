@@ -1,6 +1,7 @@
 package com.skible.be.dto;
 
 public class ChatMessage {
+
     private String roomId;
     private String sender;
     private String content;
