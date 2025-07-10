@@ -2,7 +2,6 @@ package com.skible.be.service;
 
 import com.skible.be.dto.GameState;
 import com.skible.be.enums.GameStatus;
-import com.skible.be.enums.RoundResult;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -16,6 +15,8 @@ public class GameStateService {
     private final Map<String, String>      chosenWords  = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> readyPlayers = new ConcurrentHashMap<>();
     private final Map<String,Integer> currentPickerIndex = new ConcurrentHashMap<>();
+
+    
     public GameState initializeGame(String roomId) {
         GameState state = new GameState();
         state.setRoomId(roomId);

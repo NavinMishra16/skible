@@ -2,9 +2,9 @@ package com.skible.be.skibleController;
 import com.skible.be.dto.*;
 import com.skible.be.service.GameManager;
 import com.skible.be.service.GameStateService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -21,16 +21,16 @@ public class SkibleController {
       private final GameStateService gameStateService;
       private final SimpMessagingTemplate messagingTemplate;
 
-      @Autowired
       public SkibleController(
-              GameManager gameManager,
-              GameStateService gameStateService,
-              SimpMessagingTemplate messagingTemplate
-      ){
-            this.gameManager      = gameManager;
-            this.gameStateService = gameStateService;
-            this.messagingTemplate = messagingTemplate;
-      }
+              GameManager gameManager,GameStateService gameStateService,
+              SimpMessagingTemplate messagingTemplate){    
+        this.gameManager = gameManager;  
+        this.gameStateService = gameStateService;
+        this.messagingTemplate = messagingTemplate;
+        }
+
+
+
       // Helper Method to BroadCast the score of current room
       private void broadCastScore(String roomId){
             Map<String,Integer>scores = gameManager.getScores(roomId);
@@ -73,27 +73,39 @@ public class SkibleController {
       // Ready & game start
 
       @PostMapping("/player-ready")
-      public ResponseEntity<?> playerReady(@RequestBody PlayerReadyRequest req) {
-            boolean isReady = gameManager.togglePlayerReady(req.getRoomId(), req.getPlayerName());
+      public ResponseEntity<?> playerReady(@RequestBody PlayerReadyRequest request) {
 
-            // broadcast ready toggle
+            boolean isReady = gameManager.togglePlayerReady(request.roomId(),request.playerName());
+
             messagingTemplate.convertAndSend(
-                    "/topic/room/" + req.getRoomId() + "/player-ready",
-                    new PlayerReadyResponse(req.getPlayerName(), isReady)
+                    "/topic/room/" + request.roomId() + "/player-ready",
+
+                    Map.of(
+                        "playerName",request.playerName(),
+                        "ready",isReady
+                        )
             );
 
-            if (gameManager.allPlayerReady(req.getRoomId())) {
+            if (gameManager.allPlayerReady(request.roomId())) {
                   // 1) start game
-                  GameStateResponse state = gameManager.startGame(req.getRoomId());
+                  GameState gameState = gameManager.startGame(request.roomId());
                   messagingTemplate.convertAndSend(
-                          "/topic/room/" + req.getRoomId() + "/game-started",
-                          state
+                          "/topic/room/" + request.roomId() + "/game-started",
+                          Map.of(
+                                "roomId", gameState.getRoomId(),
+                                "players", gameState.getPlayers(),
+                                "currentRound", gameState.getCurrentRound(),
+                                "currentPlayer", gameState.getCurrentPlayer(),
+                                "status", gameState.getStatus()
+                          )
                   );
 
                   // 2) announce first pick-phase
-                  String firstPicker = gameManager.getCurrentPicker(req.getRoomId());
+
+                  String firstPicker = gameManager.getCurrentPicker(request.roomId());
                   messagingTemplate.convertAndSend(
-                          "/topic/room/" + req.getRoomId() + "/turn-start",
+                          "/topic/room/" + request.roomId() + "/turn-start",
+
                           Map.of(
                                   "currentPlayer", firstPicker,
                                   "phase", "PICK"
@@ -107,13 +119,18 @@ public class SkibleController {
       // Pick-phase: word options & selection
 
       @MessageMapping("/get-word-options")
-      public void getWordOptions(WordOptionsRequest req) {
+      public void getWordOptions(@Payload PlayerReadyRequest request) {
+
             List<String> opts = gameManager.getWordOptionsForRoom(
-                    req.getRoomId(), req.getPlayerName()
+                    request.roomId(), request.playerName()
             );
+
             messagingTemplate.convertAndSend(
-                    "/topic/room/" + req.getRoomId() + "/word-options",
-                    new WordOptionResponse(req.getRoomId(), opts)
+                    "/topic/room/" + request.roomId() + "/word-options",
+                    Map.of(
+                        "roomId", request.roomId(),
+                        "options", opts
+                    )
             );
       }
 
@@ -124,17 +141,23 @@ public class SkibleController {
                     req.getRoomId(), req.getPlayerName(), req.getChosenWord()
             );
 
+
             // 2) broadcast the chosen word
             messagingTemplate.convertAndSend(
-                    "/topic/room/" + req.getRoomId() + "/word-chosen",
-                    new PickWordResponse(req.getRoomId(), req.getChosenWord())
-            );
+                    
+            "/topic/room/" + req.getRoomId() + "/word-chosen",
+            Map.of(       
+            "roomId",req.getRoomId(),    
+            "chosenWord",req.getChosenWord()       
+            )
+                    );
 
             // 3) broadcast updated game state
-            messagingTemplate.convertAndSend(
+             GameState gameState = gameManager.getGameState(req.getRoomId());
+             messagingTemplate.convertAndSend(
                     "/topic/room/" + req.getRoomId() + "/game-state",
-                    gameManager.getGameState(req.getRoomId())
-            );
+                    gameState
+                    );
 
             // 4) announce guess-phase
             messagingTemplate.convertAndSend(
@@ -202,8 +225,8 @@ public class SkibleController {
             // 5) immediately send word-options for next pick
             List<String> opts = gameManager.getWordOptionsForRoom(req.getRoomId(), nextPicker);
             messagingTemplate.convertAndSend(
-                    "/topic/room/" + req.getRoomId() + "/word-options",
-                    new WordOptionResponse(req.getRoomId(), opts)
+            "/topic/room/" + req.getRoomId() + "/word-options",
+            Map.of("roomId", req.getRoomId(), "options", opts)
             );
       }
 }
