@@ -1,122 +1,137 @@
 package com.skible.be.service;
-
-import com.skible.be.dto.GameState;
 import com.skible.be.enums.GameStatus;
-import com.skible.be.enums.RoundResult;
-import org.springframework.stereotype.Service;
+import com.skible.be.model.GameState;
 
+import org.springframework.stereotype.Service;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 @Service
 public class GameStateService {
     private final Map<String, GameState>   gameStates   = new ConcurrentHashMap<>();
-    private final Map<String, String>      chosenWords  = new ConcurrentHashMap<>();
-    private final Map<String, Set<String>> readyPlayers = new ConcurrentHashMap<>();
-    private final Map<String,Integer> currentPickerIndex = new ConcurrentHashMap<>();
+    
     public GameState initializeGame(String roomId) {
-        GameState state = new GameState();
-        state.setRoomId(roomId);
-        state.setStatus(GameStatus.WAITING_FOR_PLAYERS);
-        state.setCurrentPlayerIndex(0);            // start with player-0
+        GameState state = new GameState(roomId);
         gameStates.put(roomId, state);
-        readyPlayers.put(roomId, new CopyOnWriteArraySet<>());
         return state;
+    }
+
+    public GameState getGameState(String roomId){
+        GameState gameState = gameStates.get(roomId);
+        if(gameState == null){
+            throw new IllegalArgumentException("No Game Found for room : " + roomId);
+        }
+        return gameState;
     }
 
     public GameState addPlayerToGame(String roomId, String playerName) {
-        GameState state = getState(roomId);
+        GameState state = getGameState(roomId);
         state.addPlayer(playerName);
-        readyPlayers.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>());
         return state;
     }
 
+
     public boolean togglePlayerReady(String roomId, String playerName) {
-        Set<String> set = readyPlayers.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>());
-        if (set.remove(playerName)) return false;
-        set.add(playerName);
-        return true;
+
+        return gameStates.get(roomId).togglePlayerReady(playerName);
     }
 
     public boolean allPlayersReady(String roomId) {
-        GameState state = getState(roomId);
-        Set<String> set = readyPlayers.get(roomId);
-        return set != null
-                && state.getPlayers().size() >= 2
-                && set.containsAll(state.getPlayers());
+        GameState gameState = gameStates.get(roomId);
+        return gameState.allPlayersReady();
     }
 
     public GameState startGame(String roomId) {
-        GameState state = getState(roomId);
-        if (state.getPlayers().size() < 2) {
-            throw new IllegalStateException("Need 2 players");
+        GameState gameState =  getGameState(roomId);
+        if(gameState.getPlayers().size() < 2){
+            throw new IllegalArgumentException("Need 2 Players to play the game" + roomId);
         }
-        state.setStatus(GameStatus.IN_PROGRESS);
-        state.setCurrentRound(1);
-        state.setCurrentPlayerIndex(0);            // reset to first player
-        currentPickerIndex.put(roomId,0);
-        return state;
+        gameState.setStatus(GameStatus.IN_PROGRESS);
+        gameState.setCurrentRound(1);
+        gameState.setCurrentPlayerIndex(0);
+
+        return gameState;
     }
 
     public GameState updateChosenWord(String roomId, String word) {
-        chosenWords.put(roomId, word);
-        return getState(roomId);
+        GameState gameState = gameStates.get(roomId);
+        gameState.setChosenWord(word);
+        return gameState;
+
     }
 
     public String getChosenWord(String roomId) {
-        return chosenWords.get(roomId);
+        return  gameStates.get(roomId).getChosenWord();
     }
 
     /** Flip currentPlayerIndex (0↔1), clear the chosen word, and return new current. */
-    public String advanceTurn(String roomId) {
-        GameState st = getState(roomId);
-        st.toggleCurrentPlayer();
-        return getCurrentPlayer(roomId);
-    }
+
+
+
     public String advanceToNextRound(String roomId){
-        GameState st = getState(roomId);
-        chosenWords.remove(roomId);
-        Integer currentPicker = currentPickerIndex.get(roomId);
-        int newPicker = 1 - currentPicker;
-        currentPickerIndex.put(roomId,newPicker);
-        st.setCurrentPlayerIndex(newPicker);
-        st.setCurrentRound(st.getCurrentRound()+1);
-        return getCurrentPlayer(roomId);
+        GameState gameState = getGameState(roomId);
+        gameState.advanceToNextRound();
+        return gameState.getCurrentPlayer();
     }
 
     public String getCurrentPicker(String roomId){
-        Integer pickerIdx = currentPickerIndex.get(roomId);
-        if(pickerIdx == null)pickerIdx = 0 ;
-        GameState st = getState(roomId);
-        return st.getPlayers().get(pickerIdx);
+        GameState state = getGameState(roomId);
+        return state.getCurrentPicker();
     }
 
     public String getCurrentGuesser(String roomId){
-        Integer guessIdx = currentPickerIndex.get(roomId);
-        if(guessIdx == null)guessIdx = 0 ;
-        GameState st = getState(roomId);
-        return st.getPlayers().get(1- guessIdx);
+        GameState state = getGameState(roomId);
+        return state.getCurrentGuesser();
     }
 
 
 
     public String getCurrentPlayer(String roomId) {
-        GameState st = getState(roomId);
-        return st.getPlayers().get(st.getCurrentPlayerIndex());
+       GameState gameState = getGameState(roomId);
+       return gameState.getCurrentPlayer();
     }
+    
 
+    // Can be Removed 
     public String getOtherPlayer(String roomId) {
-        GameState st = getState(roomId);
-        return st.getPlayers().get(1 - st.getCurrentPlayerIndex());
+        GameState gameState = getGameState(roomId);
+        return gameState.getPlayers().get(1 - gameState.getCurrentPlayerIndex());
+    }
+
+     public boolean canStartGame(String roomId) {
+        GameState state = getGameState(roomId);
+         System.out.println("[DEBUG] players="   + state.getPlayers() +
+                   ", readySet="        + state.getReadyPlayers() +
+                   ", allReady="        + state.allPlayersReady() +
+                   ", status="          + state.getStatus());
+
+        return state.getPlayers().size() >= 2 && 
+               state.allPlayersReady() && 
+               state.getStatus() == GameStatus.WAITING_FOR_PLAYERS;
+    }
+
+    public boolean isGameInProgress(String roomId) {
+        GameState state = getGameState(roomId);
+        return state.getStatus() == GameStatus.IN_PROGRESS;
+    }
+
+    public boolean isWaitingForPlayers(String roomId) {
+        GameState state = getGameState(roomId);
+        return state.getStatus() == GameStatus.WAITING_FOR_PLAYERS;
+    }
+
+     public boolean isGameFinished(String roomId) {
+        GameState state = getGameState(roomId);
+        return state.getStatus() == GameStatus.ENDED;
+    }
+
+    public void removeGame(String roomId) {
+        gameStates.remove(roomId);
+    }
+
+    public boolean gameExists(String roomId) {
+        return gameStates.containsKey(roomId);
     }
 
 
-
-    GameState getState(String roomId) {
-        GameState st = gameStates.get(roomId);
-        if (st == null) throw new IllegalArgumentException("No game for room " + roomId);
-        return st;
-    }
 }
