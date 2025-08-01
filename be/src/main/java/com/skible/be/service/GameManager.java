@@ -1,7 +1,8 @@
 package com.skible.be.service;
 import com.skible.be.service.GameManager;
-import com.skible.be.dto.GameState;
 import com.skible.be.dto.RoomResponse;
+import com.skible.be.model.GameState;
+
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -41,6 +42,9 @@ public class GameManager {
     }
 
     public boolean togglePlayerReady(String roomId, String playerName) {
+        if(gameStateService.canStartGame(roomId)){
+            startGame(roomId);
+        }
         return gameStateService.togglePlayerReady(roomId, playerName);
     }
 
@@ -66,14 +70,14 @@ public class GameManager {
         return wordService.pickN(3);
     }
 
-    /** Record the word and switch to the guesser */
-    public String chooseWordAndAdvance(String roomId, String chooser, String word) {
+    /** Record the word */
+    public String chooseWordAndRecord(String roomId, String chooser, String word) {
 
         if (!gameStateService.getCurrentPicker(roomId).equals(chooser)) {
             throw new IllegalStateException("Not your turn to pick !");
         }
         gameStateService.updateChosenWord(roomId, word);
-        return gameStateService.advanceTurn(roomId);
+        return gameStateService.getOtherPlayer(roomId);
     }
 
     /** Validate the guess (must match currentPlayer), but do not flip here */
@@ -122,7 +126,7 @@ public class GameManager {
 
     /** So your controller can broadcast the full state when needed */
     public GameState getGameState(String roomId) {
-        return gameStateService.getState(roomId);
+        return gameStateService.getGameState(roomId);
     }
 }
 
